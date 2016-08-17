@@ -39,7 +39,12 @@ module.exports.create = function (ndns, conf, store) {
   }
 
   function getSoa(conf, store, request) {
-    var name = request.question[0].name;
+    // TODO needs fixin'
+    var domainParts = request.question[0].name.split('.');
+    while (domainParts.length > 2) {
+      domainParts.shift();
+    }
+    var name = domainParts.join('.');
     var soa = {
       "name": name,
       "ttl": "7200",
@@ -47,7 +52,7 @@ module.exports.create = function (ndns, conf, store) {
       "admin": "hostmaster." + name,
       // YYYYmmddss
       // http://mxtoolbox.com/problem/dns/DNS-SOA-Serial-Number-Format
-      "serial": "2015112300",
+      "serial": "2015120800",
       "refresh": "10800",
       "retry": "3600",
       // 14 days
@@ -59,7 +64,7 @@ module.exports.create = function (ndns, conf, store) {
     return soa;
   }
 
-  function handleAny(ndns, conf, store, request, response) {
+  function handleAll(ndns, conf, store, request, response, cb) {
     var qs;
 
     if (request) {
@@ -139,6 +144,15 @@ module.exports.create = function (ndns, conf, store) {
             pushMatch(a);
           }
         }
+
+        if ('ANY' === qtype) {
+          if ('ANAME' === a.type) {
+            // TODO clone a
+            a.realtype = 'A';
+          }
+
+          pushMatch(a);
+        }
       }
 
       names.forEach(function (a) {
@@ -204,21 +218,37 @@ module.exports.create = function (ndns, conf, store) {
 
         return ndns[a.type](result);
       })).then(function (answers) {
-        response.answer = answers.filter(function (a) {
+        response.answer = response.answer.concat(answers.filter(function (a) {
           return a;
-        });
-        response.send();
+        }));
+        // response.send();
+        cb();
       });
     });
   }
 
+  function addNs(ndns, conf, store, request, response) {
+    conf.nameservers.forEach(function (ns) {
+      response.answer.push(ndns.NS({
+        name: request.question[0].name
+      , data: ns.name
+      , ttl: 60 * 60
+      }));
+      response.additional.push(ndns.A({
+        name: ns.name
+      , address: ns.ipv4
+      , ttl: 60 * 60
+      }));
+    });
+  }
+
   var handlers = {
-    SOA: function (ndns, conf, store, request, response) {
+    SOA: function (ndns, conf, store, request, response, cb) {
       // See example of
       // dig soa google.com @ns1.google.com
 
       // TODO auto-increment serial number as epoch timestamp (in seconds) of last record update for that domain
-      if (false && /^ns\d\./.test(name)) {
+      if (false && /^ns\d\./i.test(name)) {
         /*
         soa.ttl = 60;
 
@@ -231,24 +261,13 @@ module.exports.create = function (ndns, conf, store) {
       } else {
         response.answer.push(ndns.SOA(getSoa(conf, store, request)));
 
-        conf.nameservers.forEach(function (ns) {
-          response.authority.push(ndns.NS({
-            name: request.question[0].name
-          , data: ns.name
-          , ttl: 60 * 60
-          }));
+        addNs(ndns, conf, store, request, response);
 
-          response.additional.push(ndns.A({
-            name: ns.name
-          , address: ns.ipv4
-          , ttl: 60 * 60
-          }));
-        });
-
-        response.send();
+        //response.send();
+        cb();
       }
     }
-  , NAPTR: function (ndns, conf, store, request, response) {
+  , NAPTR: function (ndns, conf, store, request, response, cb) {
       // See example of
       // dig naptr google.com @ns1.google.com
 
@@ -258,69 +277,84 @@ module.exports.create = function (ndns, conf, store) {
         "flags": "aa qr rd"
       }));
       */
-      response.send();
-      return;
+
+      // response.send();
+      cb();
     }
-  , NS: function (ndns, conf, store, request, response) {
-      if ('NS' === ndns.consts.QTYPE_TO_NAME[request && request.question[0].type]) {
+  , NS: function (ndns, conf, store, request, response, cb) {
+      // See example of
+      // dig ns google.com @ns1.google.com
 
-        // See example of
-        // dig ns google.com @ns1.google.com
+      //console.log(Object.keys(response));
+      //console.log('response.header');
+      //console.log(response.header);
+      //console.log('response.authority');
+      //console.log(response.authority);
 
-        //console.log(Object.keys(response));
-        //console.log('response.header');
-        //console.log(response.header);
-        //console.log('response.authority');
-        //console.log(response.authority);
+      addNs(ndns, conf, store, request, response);
 
-        conf.nameservers.forEach(function (ns) {
-          response.answer.push(ndns.NS({
-            name: request.question[0].name
-          , data: ns.name
-          , ttl: 60 * 60
-          }));
-          response.additional.push(ndns.A({
-            name: ns.name
-          , address: ns.ipv4
-          , ttl: 60 * 60
-          }));
-        });
-
-        response.send();
-        return;
-      }
+      cb();
+      //response.send();
     }
-  , A: function (ndns, conf, store, request, response) {
+  , A: function (ndns, conf, store, request, response, cb) {
       if (/^local(host)?\./.test(request.question[0].name)) {
         setLocalhost(request, response, '127.0.0.1');
-        response.send();
+        cb();
+        //response.send();
         return;
       }
 
-      handleAny(ndns, conf, store, request, response);
+      handleAll(ndns, conf, store, request, response, cb);
     }
-  , AAAA: function (ndns, conf, store, request, response) {
+  , AAAA: function (ndns, conf, store, request, response, cb) {
       if (/^local(host)?\./.test(request.question[0].name)) {
         setLocalhost(request, response, '::1');
-        response.send();
+        cb();
+        //response.send();
         return;
       }
 
-      handleAny(ndns, conf, store, request, response);
+      handleAll(ndns, conf, store, request, response, cb);
     }
-  , CNAME: handleAny
-  , MX: handleAny
-  , SRV: handleAny
-  , TXT: handleAny
-  , any: handleAny
+  , ANY: function handleAny(ndns, conf, store, request, response, cb) {
+      addNs(ndns, conf, store, request, response);
+
+      handleAll(ndns, conf, store, request, response, cb);
+    }
+  , CNAME: handleAll
+  , MX: handleAll
+  , SRV: handleAll
+  , TXT: handleAll
+  , any: handleAll
   };
 
   return function (request, response) {
-    var typename = ndns.consts.QTYPE_TO_NAME[request && request.question[0].type];
-    //console.log('\n\n');
-    //console.log('request', request.question);
-    //console.log('type', ndns.consts.QTYPE_TO_NAME[request.question[0].type]);
-    //console.log('class',ndns.consts.QCLASS_TO_NAME[request.question[0].class]);
+    // although the standard defines the posibility of multiple queries,
+    // in practice there is only one query per request
+    var question = response.question[0];
+    var wname = question && question.name || '';
+    var lname = question && question.name.toLowerCase() || '';
+    var typename = ndns.consts.QTYPE_TO_NAME[question && question.type];
+    if (question) {
+      question.name = lname;
+    }
+    /*
+    if (question && /coolaj86.com$/i.test(question.name)) {
+      console.log('\n\n');
+      //console.log('request keys', Object.keys(request));
+      console.log('request.question:', request.question.map(function (q) {
+        q.qtype = ndns.consts.QTYPE_TO_NAME[q.type];
+        q.qclass = ndns.consts.QCLASS_TO_NAME[q.class];
+        return JSON.stringify(q);
+      }));
+
+      console.log('request.additional:', request.additional.map(function (q) {
+        q.qtype = ndns.consts.QTYPE_TO_NAME[q.type];
+        q.qclass = ndns.consts.QCLASS_TO_NAME[q.class];
+        return JSON.stringify(q);
+      }));
+    }
+    */
 
     // This is THE authority
     response.header.aa = 1;
@@ -329,6 +363,62 @@ module.exports.create = function (ndns, conf, store) {
       typename = 'any';
     }
 
-    handlers[typename](ndns, conf, store, request, response);
+    handlers[typename](ndns, conf, store, request, response, function () {
+      var opt;
+      var opt2;
+
+      if (request.additional.some(function (q) {
+        // ndns.consts.NAME_TO_QTYPE.OPT // 41
+        if (ndns.consts.NAME_TO_QTYPE.OPT === q.type) {
+          if (opt) {
+            opt2 = q;
+          }
+          opt = q;
+        }
+        return q;
+      })) {
+        response.header.rcode = ndns.consts.NAME_TO_RCODE.NOERROR; // No Error
+
+        if (0 !== opt.version) {
+          response.header.rcode = ndns.consts.NAME_TO_RCODE.BADVERS; // Bad Version
+        }
+
+        if (opt2) {
+          response.header.rcode = ndns.consts.NAME_TO_RCODE.FORMERR; // Format Error
+        }
+
+        response.edns_version = 0;
+      }
+
+      // 'undefined' === typeof response.edns_version
+      //  && -1 !== ['IN', 'A'].indexOf(typename)
+      if (!response.answer.length) {
+        response.authority.push(ndns.SOA(getSoa(conf, store, request)));
+      }
+
+      /*
+      if (request.question[0] && /coolaj86.com$/i.test(request.question[0].name)) {
+        response.debug = 1;
+        console.log('response.header', response.header);
+        console.log('response.edns_version', response.edns_version);
+        console.log('response.answer', response.answer);
+        console.log('response.authority', response.authority);
+        console.log('response.additional', response.additional);
+      }
+      */
+
+      // Because WWw.ExaMPLe.coM increases security...
+      // https://github.com/letsencrypt/boulder/issues/1228
+      // https://github.com/letsencrypt/boulder/issues/1243
+      ['answer', 'additional', 'authority'].forEach(function (atype) {
+        response[atype].forEach(function (a) {
+          if (a.name) {
+            a.name = a.name.replace(lname, wname);
+          }
+        });
+      });
+
+      response.send();
+    });
   };
 };
