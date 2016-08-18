@@ -1,6 +1,9 @@
 'use strict';
 
-module.exports.create = function (port, address4, conf, getAnswerList) {
+module.exports.create = function (conf) {
+  var port = conf.port || 53;
+  var address4 = conf.address4 || '0.0.0.0';
+  var getAnswerList = conf.getAnswerList;
   var ndns = require('native-dns');
   var recordStore;
   var handler;
@@ -50,6 +53,14 @@ module.exports.create = function (port, address4, conf, getAnswerList) {
     }
   }
 
+  function onRequest(request, response) {
+    try {
+      handler(request, response);
+    } catch(e) {
+      onRequestError(e, request, response);
+    }
+  }
+
   function createServer(server) {
     if (!server) {
       return null;
@@ -58,13 +69,7 @@ module.exports.create = function (port, address4, conf, getAnswerList) {
     try {
       server.on('error', onError);
       server.on('socketError', onSocketError);
-      server.on('request', function (request, response) {
-        try {
-          handler(request, response);
-        } catch(e) {
-          onRequestError(e, request, response);
-        }
-      });
+      server.on('request', onRequest);
     } catch(e) {
       console.error('[Create Server] Failed to create server');
       console.error(e.stack);
@@ -87,6 +92,32 @@ module.exports.create = function (port, address4, conf, getAnswerList) {
       console.error(e.stack);
       return onClose(e);
     }
+  }
+
+  function close() {
+    var PromiseA = require('bluebird');
+
+    return new PromiseA(function (resolve, reject) {
+      var count = 0;
+
+      function onClose(e) {
+        if (e) {
+          reject(e);
+          return;
+        }
+
+        count += 1;
+        if (count > 1) {
+          resolve();
+        }
+      }
+
+      closeServer(udpserver, onClose);
+      closeServer(tcpserver, onClose);
+
+      tcpserver = null;
+      udpserver = null;
+    });
   }
 
   function listen() {
@@ -116,34 +147,11 @@ module.exports.create = function (port, address4, conf, getAnswerList) {
     });
   }
 
-  function close() {
-    var PromiseA = require('bluebird');
-
-    return new PromiseA(function (resolve, reject) {
-      var count = 0;
-
-      function onClose(e) {
-        if (e) {
-          reject(e);
-          return;
-        }
-
-        count += 1;
-        if (count > 1) {
-          resolve();
-        }
-      }
-
-      closeServer(udpserver, onClose);
-      closeServer(tcpserver, onClose);
-
-      tcpserver = null;
-      udpserver = null;
-    });
-  }
-
   return {
     listen: listen
   , close: close
+  , onError: onError
+  , onSocketError: onSocketError
+  , onRequest: onRequest
   };
 };
