@@ -1,5 +1,5 @@
 {
-  "name": "com.daplie.ddns.service",
+  "name": "ddns-nameserver",
   "version": "1.0.0",
   "description": "Dynamic DNS Server",
   "main": "index.js",
