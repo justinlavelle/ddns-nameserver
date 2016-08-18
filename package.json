@@ -14,7 +14,7 @@
   "devDependencies": {},
   "repository": {
     "type": "git",
-    "url": "https://github.com/Daplie/node-ddns-server.git"
+    "url": "https://github.com/Daplie/ddns-nameserver.git"
   },
   "author": "AJ ONeal <coolaj86@gmail.com> (https://coolaj86.com)",
   "license": "(MIT OR Apache-2.0)"
