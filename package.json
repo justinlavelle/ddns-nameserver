@@ -1,6 +1,6 @@
 {
   "name": "ddns-nameserver",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Dynamic DNS Server",
   "main": "index.js",
   "walnut": "wrapper.js",
